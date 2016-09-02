@@ -1,0 +1,60 @@
+
+# Pour le générateur de graphe
+FLAGS_GENERATION = -DGRAPH_GENERATOR_MPI -DGRAPH_GENERATOR_OMP -DGRAPHGEN_DISTRIBUTED_MEMORY
+
+# Flags C et C++
+FLAGS_COMMON =-O3 -openmp -Wall -Wno-unused -Wextra $(FLAGS_GENERATION) -Drestrict=__restrict__  -DNDEBUG
+CXXFLAGS = $(FLAGS_COMMON)
+CFLAGS = $(FLAGS_COMMON) -std=gnu99
+
+# Edition de lien 
+LD_FLAGS = -openmp $(FLAGS_GENERATION)
+
+# Compilateur
+MPICC = mpiicc #-mmic
+MPICXX = mpiicpc #-mmic
+CUDA = nvcc
+
+# Nombre de process MPI 
+PROCESS_COUNT=1
+
+all: graph500_cpu graph500_mmic
+
+GENERATOR_OBJECTS = generator/graph_generator.o generator/make_graph.o generator/splittable_mrg.o generator/utils.o
+OBJECTS = onesided_emul.o main.o utils.o validate.o onesided.o
+OBJECT_CPU = bfs_cpu.o
+HEADERS = common.hpp onesided.hpp
+
+graph500_cpu: $(OBJECTS) $(OBJECT_CPU) $(GENERATOR_OBJECTS)
+	$(MPICXX) -o $@ $(OBJECTS) $(OBJECT_CPU) $(GENERATOR_OBJECTS) $(LD_FLAGS) -lm
+
+graph500_mmic: $(OBJECTS) $(OBJECT_CPU) $(GENERATOR_OBJECTS)
+	$(MPICXX) -o $@ $(OBJECTS) $(OBJECT_CPU) $(GENERATOR_OBJECTS) $(LD_FLAGS) -lm
+
+$(OBJECTS) : $(HEADERS)
+
+bfs_cpu.o:
+	$(MPICXX) $(CXXFLAGS) -c bfs_cpu.cpp -o $@ -DPROCESS_COUNT=$(PROCESS_COUNT) 
+
+.s.o:
+	$(MPICXX) $(CXXFLAGS) -c $< -o $@
+
+.c.o:
+	$(MPICC) $(CFLAGS) -c $< -o $@
+
+.cpp.o: $(HEADERS)
+	$(MPICXX) $(CXXFLAGS) -c $< -o $@
+
+clean_o:
+	rm -f *.o
+	rm -f generator/*.o
+	rm -f *~ 
+	rm -f generator/*~
+
+clean:
+	rm -f *.o
+	rm -f graph500_cpu
+	rm -f graph500_gpu
+	rm -f generator/*.o 
+	rm -f generator/*~
+	rm -f *~

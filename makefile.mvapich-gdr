@@ -1,0 +1,73 @@
+
+# Flags CUDA, noter le MPI_INCLUDE 
+CUDA_FLAGS =  -arch=sm_35 -Xcompiler -fopenmp -O3 -I$(MPI_INCLUDE) -Drestrict=__restrict__
+
+# Pour le générateur de graphe
+FLAGS_GENERATION = -DGRAPH_GENERATOR_MPI -DGRAPH_GENERATOR_OMP -DGRAPHGEN_DISTRIBUTED_MEMORY
+
+# Flags C et C++
+FLAGS_COMMON =-O3 -fopenmp -Wall -Wno-unused -Wextra $(FLAGS_GENERATION) -Drestrict=__restrict__  -DNDEBUG
+CXXFLAGS = $(FLAGS_COMMON)
+CFLAGS = $(FLAGS_COMMON) -std=gnu99
+
+# Edition de lien 
+CUDA_LDFLAGS = -L$(CUDA_HOME)/lib64 -lcudart -lcudadevrt
+LDFLAGS_CPU = -fopenmp $(FLAGS_GENERATION)
+LDFLAGS_GPU = -fopenmp $(CUDA_LDFLAGS) $(FLAGS_GENERATION)
+
+# Compilateur
+MPICC = mpicc
+MPICXX = mpicxx
+CUDA = nvcc
+
+# Nombre de process MPI 
+PROCESS_COUNT=64
+
+all: graph500_gpu 
+#graph500_gpu
+
+GENERATOR_OBJECTS = generator/graph_generator.o generator/make_graph.o generator/splittable_mrg.o generator/utils.o
+OBJECTS = onesided_emul.o main.o utils.o validate.o onesided.o
+OBJECT_GPU = bfs_gpu.o bfs_link_gpu.o
+OBJECT_CPU = bfs_cpu.o
+HEADERS = common.hpp onesided.hpp
+
+graph500_cpu: $(OBJECTS) $(OBJECT_CPU) $(GENERATOR_OBJECTS)
+	$(MPICXX) -o $@ $(OBJECTS) $(OBJECT_CPU) $(GENERATOR_OBJECTS) $(LDFLAGS_CPU) -lm
+
+graph500_gpu: $(OBJECTS) $(OBJECT_GPU) $(GENERATOR_OBJECTS)
+	$(MPICXX) -o $@ $(OBJECTS) $(OBJECT_GPU) $(GENERATOR_OBJECTS) $(LDFLAGS_GPU) -lm
+
+$(OBJECTS) : $(HEADERS)
+
+bfs_cpu.o:
+	$(MPICXX) $(CXXFLAGS) -c bfs_cpu.cpp -o $@ -DPROCESS_COUNT=$(PROCESS_COUNT) 
+
+bfs_link_gpu.o:
+	$(CUDA) -dlink -o bfs_link_gpu.o bfs_gpu.o $(CUDA_FLAGS) -DPROCESS_COUNT=$(PROCESS_COUNT) 
+
+bfs_gpu.o:
+	$(CUDA) -rdc=true -c bfs_gpu.cu -o bfs_gpu.o $(CUDA_FLAGS) -DPROCESS_COUNT=$(PROCESS_COUNT)
+	
+.s.o:
+	$(MPICXX) $(CXXFLAGS) -c $< -o $@
+
+.c.o:
+	$(MPICC) $(CFLAGS) -c $< -o $@
+
+.cpp.o: $(HEADERS)
+	$(MPICXX) $(CXXFLAGS) -c $< -o $@
+
+clean_o:
+	rm -f *.o
+	rm -f generator/*.o
+	rm -f *~ 
+	rm -f generator/*~
+
+clean:
+	rm -f *.o
+	rm -f graph500_cpu
+	rm -f graph500_gpu
+	rm -f generator/*.o 
+	rm -f generator/*~
+	rm -f *~
